@@ -5,6 +5,8 @@ import json
 import math
 import shutil
 import subprocess
+import sys
+import time
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -64,8 +66,20 @@ def parse_symbol_list(raw: str) -> list[str]:
     return [item.strip() for item in raw.replace("\n", ",").split(",") if item.strip()]
 
 
-def normalize_binance_symbol(symbol: str) -> str:
+def normalize_exchange_symbol(symbol: str) -> str:
     return symbol.replace("/", "").replace("-", "").upper()
+
+
+def display_quote_symbol(symbol: str, quote_coin: str = "USDT") -> str:
+    normalized = normalize_exchange_symbol(symbol)
+    quote = quote_coin.upper()
+    if normalized.endswith(quote):
+        return f"{normalized[: -len(quote)]}/{quote}"
+    return normalized
+
+
+def normalize_binance_symbol(symbol: str) -> str:
+    return normalize_exchange_symbol(symbol)
 
 
 def display_binance_symbol(symbol: str) -> str:
@@ -77,6 +91,105 @@ def display_binance_symbol(symbol: str) -> str:
     if normalized.endswith("USDC"):
         return f"{normalized[:-4]}/USDC"
     return normalized
+
+
+def fetch_bybit_instruments(category: str = "spot", quote_coin: str = "USDT") -> list[str]:
+    symbols: list[str] = []
+    cursor = ""
+    while True:
+        params = {
+            "category": category,
+            "status": "Trading",
+        }
+        if quote_coin:
+            params["quoteCoin"] = quote_coin.upper()
+        if cursor:
+            params["cursor"] = cursor
+        if category != "spot":
+            params["limit"] = "1000"
+
+        payload = _fetch_bybit("/v5/market/instruments-info", params)
+        result = payload.get("result", {})
+        for item in result.get("list", []):
+            if item.get("status") != "Trading":
+                continue
+            if quote_coin and item.get("quoteCoin") != quote_coin.upper():
+                continue
+            if item.get("symbolType") == "xstocks":
+                continue
+            symbol = item.get("symbol")
+            if symbol:
+                symbols.append(symbol)
+
+        cursor = result.get("nextPageCursor") or ""
+        if not cursor:
+            break
+
+    return sorted(dict.fromkeys(symbols))
+
+
+def fetch_bybit_klines(
+    symbol: str,
+    category: str = "spot",
+    quote_coin: str = "USDT",
+    interval: str = "60",
+    limit: int = 1000,
+) -> list[Candle]:
+    normalized = normalize_exchange_symbol(symbol)
+    payload = _fetch_bybit(
+        "/v5/market/kline",
+        {
+            "category": category,
+            "symbol": normalized,
+            "interval": interval,
+            "limit": str(limit),
+        },
+    )
+    rows = payload.get("result", {}).get("list", [])
+    display_symbol = display_quote_symbol(normalized, quote_coin=quote_coin)
+    candles = []
+    for row in rows:
+        timestamp_ms, open_, high, low, close, volume, turnover = row[:7]
+        candles.append(
+            Candle(
+                timestamp=datetime.fromtimestamp(int(timestamp_ms) / 1000, tz=UTC).replace(tzinfo=None),
+                open=float(open_),
+                high=float(high),
+                low=float(low),
+                close=float(close),
+                volume=float(volume),
+                quote_volume=float(turnover),
+                symbol=display_symbol,
+            )
+        )
+    return sorted(candles, key=lambda item: item.timestamp)
+
+
+def fetch_bybit_universe(
+    symbols: list[str] | None = None,
+    category: str = "spot",
+    quote_coin: str = "USDT",
+    interval: str = "60",
+    limit: int = 1000,
+    max_symbols: int = 0,
+    request_delay_seconds: float = 0.05,
+) -> dict[str, list[Candle]]:
+    selected_symbols = symbols or fetch_bybit_instruments(category=category, quote_coin=quote_coin)
+    if max_symbols > 0:
+        selected_symbols = selected_symbols[:max_symbols]
+
+    universe: dict[str, list[Candle]] = {}
+    for index, symbol in enumerate(selected_symbols, start=1):
+        try:
+            candles = fetch_bybit_klines(symbol, category=category, quote_coin=quote_coin, interval=interval, limit=limit)
+        except RuntimeError as exc:
+            print(f"Bybit: skipped {symbol}: {exc}", file=sys.stderr)
+            continue
+        if candles:
+            universe[candles[0].symbol] = candles
+        if request_delay_seconds > 0 and index < len(selected_symbols):
+            time.sleep(request_delay_seconds)
+    return universe
 
 
 def fetch_binance_klines(symbol: str, interval: str = "1h", limit: int = 1000) -> list[Candle]:
@@ -290,3 +403,16 @@ def _fetch_json_with_curl(url: str, timeout: int) -> object:
     if completed.returncode != 0:
         raise RuntimeError(f"curl fallback failed: {completed.stderr.strip()}")
     return json.loads(completed.stdout)
+
+
+def _fetch_bybit(path: str, params: dict[str, str]) -> dict:
+    query = parse.urlencode(params)
+    payload = _fetch_json(f"https://api.bybit.com{path}?{query}")
+    if not isinstance(payload, dict):
+        raise RuntimeError("Bybit returned a non-object response")
+
+    ret_code = payload.get("retCode")
+    if ret_code != 0:
+        message = payload.get("retMsg", "unknown Bybit API error")
+        raise RuntimeError(f"Bybit retCode {ret_code}: {message}")
+    return payload

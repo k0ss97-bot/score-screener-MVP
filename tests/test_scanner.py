@@ -4,9 +4,11 @@ import unittest
 
 from score_screener.data import (
     display_binance_symbol,
+    display_quote_symbol,
     generate_demo_candles,
     generate_demo_universe,
     normalize_binance_symbol,
+    normalize_exchange_symbol,
     parse_symbol_list,
 )
 from score_screener.models import ScannerConfig
@@ -48,8 +50,10 @@ class ScreenerTests(unittest.TestCase):
         self.assertIn("LATE/USDT", symbols)
         self.assertNotIn("QUIET/USDT", symbols)
 
-    def test_binance_symbol_helpers(self) -> None:
+    def test_exchange_symbol_helpers(self) -> None:
         self.assertEqual(parse_symbol_list("BTCUSDT, ETH/USDT\nSOLUSDT"), ["BTCUSDT", "ETH/USDT", "SOLUSDT"])
+        self.assertEqual(normalize_exchange_symbol("btc/usdt"), "BTCUSDT")
+        self.assertEqual(display_quote_symbol("ETHUSDT"), "ETH/USDT")
         self.assertEqual(normalize_binance_symbol("eth/usdt"), "ETHUSDT")
         self.assertEqual(display_binance_symbol("SOLUSDT"), "SOL/USDT")
 

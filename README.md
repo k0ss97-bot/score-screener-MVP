@@ -8,7 +8,7 @@
 
 - `score_screener/indicators.py` - RSI, MACD histogram, Bollinger width, ATR%, MFI, ADX, EMA, relative volume, z-score.
 - `score_screener/scanner.py` - поиск боковика, расчет фичей, impulse_score, reversal_score, классификация alert.
-- `score_screener/data.py` - CSV loader, Binance public klines loader, 4H/1D aggregation, synthetic demo candles.
+- `score_screener/data.py` - CSV loader, Bybit/Binance public klines loaders, Bybit instrument discovery, 4H/1D aggregation, synthetic demo candles.
 - `score_screener/storage.py` - SQLite schema для таблиц `symbols`, `candles_1h`, `features_1h`, `signals`.
 - `tests/test_scanner.py` - smoke tests на synthetic breakout и exhaustion сценариях.
 
@@ -58,7 +58,7 @@ python3 -m score_screener --demo --min-score 60 --telegram --send-all
 
 ```bash
 python3 -m score_screener \
-  --binance-symbols BTCUSDT,ETHUSDT,SOLUSDT,ALGOUSDT \
+  --exchange bybit \
   --min-score 60 \
   --telegram \
   --loop \
@@ -89,13 +89,13 @@ python3 -m score_screener --csv candles.csv --symbol ALGO/USDT --min-score 40
 python3 -m score_screener --csv universe_1h.csv --min-score 60
 ```
 
-## Live Binance input
+## Live Bybit input
 
-Для 24/7 режима на хостинге CSV не нужен. Скринер сам берет последние 1H свечи через публичный Binance Spot endpoint:
+Для 24/7 режима на хостинге CSV не нужен. По умолчанию скринер сам берет список всех активных Bybit Spot пар с quote `USDT`, затем скачивает последние 1H свечи по каждой паре:
 
 ```bash
 python3 -m score_screener \
-  --binance-symbols BTCUSDT,ETHUSDT,SOLUSDT,ALGOUSDT \
+  --exchange bybit \
   --min-score 60 \
   --telegram
 ```
@@ -103,16 +103,39 @@ python3 -m score_screener \
 Через env:
 
 ```text
-SCREENER_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,ALGOUSDT
+SCREENER_EXCHANGE=bybit
+SCREENER_BYBIT_CATEGORY=spot
+SCREENER_QUOTE=USDT
 SCREENER_MIN_SCORE=60
 SCREENER_INTERVAL_MINUTES=60
-SCREENER_BINANCE_LIMIT=1000
+SCREENER_KLINE_LIMIT=1000
+SCREENER_MAX_SYMBOLS=0
+SCREENER_REQUEST_DELAY_SECONDS=0.05
+SCREENER_SYMBOLS=
+```
+
+`SCREENER_SYMBOLS` оставь пустым, чтобы смотреть все активные Bybit USDT spot пары. Чтобы временно ограничить universe, заполни список вручную:
+
+```text
+SCREENER_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,ALGOUSDT
+```
+
+Для futures можно переключить category:
+
+```text
+SCREENER_BYBIT_CATEGORY=linear
 ```
 
 Можно передать файл символов:
 
 ```bash
 python3 -m score_screener --symbols-file symbols.txt --telegram
+```
+
+Binance остался как ручной fallback:
+
+```bash
+python3 -m score_screener --exchange binance --binance-symbols BTCUSDT,ETHUSDT --telegram
 ```
 
 ## Scoring
@@ -158,7 +181,7 @@ Dockerfile уже настроен как 24/7 worker:
 python -m score_screener --telegram --loop --state-file /app/runtime/screener_state.json
 ```
 
-Он читает `SCREENER_SYMBOLS`, `SCREENER_MIN_SCORE`, `SCREENER_INTERVAL_MINUTES`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` из environment variables.
+Он читает `SCREENER_EXCHANGE`, `SCREENER_BYBIT_CATEGORY`, `SCREENER_QUOTE`, `SCREENER_SYMBOLS`, `SCREENER_MIN_SCORE`, `SCREENER_INTERVAL_MINUTES`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` из environment variables.
 
 ### BotHost.ru
 
@@ -175,13 +198,18 @@ https://github.com/k0ss97-bot/score-screener-MVP
 ```text
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=7619454142
-SCREENER_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,ALGOUSDT
+SCREENER_EXCHANGE=bybit
+SCREENER_BYBIT_CATEGORY=spot
+SCREENER_QUOTE=USDT
+SCREENER_SYMBOLS=
 SCREENER_MIN_SCORE=60
 SCREENER_INTERVAL_MINUTES=60
-SCREENER_BINANCE_LIMIT=1000
+SCREENER_KLINE_LIMIT=1000
+SCREENER_MAX_SYMBOLS=0
+SCREENER_REQUEST_DELAY_SECONDS=0.05
 ```
 
-5. Запусти deploy. После старта контейнер сразу сделает первый scan, затем будет повторять его раз в `SCREENER_INTERVAL_MINUTES`.
+5. Запусти deploy. После старта контейнер сразу найдет все Bybit USDT spot пары, сделает первый scan, затем будет повторять его раз в `SCREENER_INTERVAL_MINUTES`.
 
 Логи должны содержать:
 
