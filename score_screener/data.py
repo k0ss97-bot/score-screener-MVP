@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import csv
+import json
 import math
+import shutil
+import subprocess
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib import error, parse, request
 
 from .models import Candle
 
@@ -44,6 +48,68 @@ def load_csv_grouped(path: Path, symbol_override: str | None = None) -> dict[str
             grouped[symbol].append(candle)
 
     return {symbol: sorted(candles, key=lambda item: item.timestamp) for symbol, candles in grouped.items()}
+
+
+def load_symbols_file(path: Path) -> list[str]:
+    symbols = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        symbols.extend(parse_symbol_list(line))
+    return symbols
+
+
+def parse_symbol_list(raw: str) -> list[str]:
+    return [item.strip() for item in raw.replace("\n", ",").split(",") if item.strip()]
+
+
+def normalize_binance_symbol(symbol: str) -> str:
+    return symbol.replace("/", "").replace("-", "").upper()
+
+
+def display_binance_symbol(symbol: str) -> str:
+    normalized = normalize_binance_symbol(symbol)
+    if normalized.endswith("USDT"):
+        return f"{normalized[:-4]}/USDT"
+    if normalized.endswith("BUSD"):
+        return f"{normalized[:-4]}/BUSD"
+    if normalized.endswith("USDC"):
+        return f"{normalized[:-4]}/USDC"
+    return normalized
+
+
+def fetch_binance_klines(symbol: str, interval: str = "1h", limit: int = 1000) -> list[Candle]:
+    normalized = normalize_binance_symbol(symbol)
+    query = parse.urlencode({"symbol": normalized, "interval": interval, "limit": limit})
+    url = f"https://api.binance.com/api/v3/klines?{query}"
+    rows = _fetch_json(url)
+    display_symbol = display_binance_symbol(normalized)
+    candles = []
+    for row in rows:
+        timestamp_ms, open_, high, low, close, volume, _close_time, quote_volume = row[:8]
+        candles.append(
+            Candle(
+                timestamp=datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC).replace(tzinfo=None),
+                open=float(open_),
+                high=float(high),
+                low=float(low),
+                close=float(close),
+                volume=float(volume),
+                quote_volume=float(quote_volume),
+                symbol=display_symbol,
+            )
+        )
+    return candles
+
+
+def fetch_binance_universe(symbols: list[str], interval: str = "1h", limit: int = 1000) -> dict[str, list[Candle]]:
+    universe: dict[str, list[Candle]] = {}
+    for symbol in symbols:
+        candles = fetch_binance_klines(symbol, interval=interval, limit=limit)
+        if candles:
+            universe[candles[0].symbol] = candles
+    return universe
 
 
 def resample_candles(candles: list[Candle], timeframe: str) -> list[Candle]:
@@ -199,3 +265,28 @@ def fetch_ohlcv_ccxt(exchange_id: str, symbol: str, timeframe: str = "1h", limit
             )
         )
     return candles
+
+
+def _fetch_json(url: str, timeout: int = 20) -> object:
+    try:
+        with request.urlopen(url, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+    except error.URLError as exc:
+        if "CERTIFICATE_VERIFY_FAILED" in str(exc.reason) and shutil.which("curl"):
+            return _fetch_json_with_curl(url, timeout)
+        raise RuntimeError(f"Network error: {exc.reason}") from exc
+
+
+def _fetch_json_with_curl(url: str, timeout: int) -> object:
+    completed = subprocess.run(
+        ["curl", "-sS", "--max-time", str(timeout), url],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"curl fallback failed: {completed.stderr.strip()}")
+    return json.loads(completed.stdout)

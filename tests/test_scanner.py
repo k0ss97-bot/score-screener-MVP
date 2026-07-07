@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from score_screener.data import generate_demo_candles, generate_demo_universe
+from score_screener.data import (
+    display_binance_symbol,
+    generate_demo_candles,
+    generate_demo_universe,
+    normalize_binance_symbol,
+    parse_symbol_list,
+)
 from score_screener.models import ScannerConfig
 from score_screener.scanner import detect_consolidation, enrich_candles, scan_symbol, scan_universe
 
@@ -41,6 +47,11 @@ class ScreenerTests(unittest.TestCase):
         self.assertIn("ALGO/USDT", symbols)
         self.assertIn("LATE/USDT", symbols)
         self.assertNotIn("QUIET/USDT", symbols)
+
+    def test_binance_symbol_helpers(self) -> None:
+        self.assertEqual(parse_symbol_list("BTCUSDT, ETH/USDT\nSOLUSDT"), ["BTCUSDT", "ETH/USDT", "SOLUSDT"])
+        self.assertEqual(normalize_binance_symbol("eth/usdt"), "ETHUSDT")
+        self.assertEqual(display_binance_symbol("SOLUSDT"), "SOL/USDT")
 
 
 if __name__ == "__main__":

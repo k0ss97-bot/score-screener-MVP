@@ -8,7 +8,7 @@
 
 - `score_screener/indicators.py` - RSI, MACD histogram, Bollinger width, ATR%, MFI, ADX, EMA, relative volume, z-score.
 - `score_screener/scanner.py` - поиск боковика, расчет фичей, impulse_score, reversal_score, классификация alert.
-- `score_screener/data.py` - CSV loader, 4H/1D aggregation, synthetic demo candles, optional CCXT fetch adapter.
+- `score_screener/data.py` - CSV loader, Binance public klines loader, 4H/1D aggregation, synthetic demo candles.
 - `score_screener/storage.py` - SQLite schema для таблиц `symbols`, `candles_1h`, `features_1h`, `signals`.
 - `tests/test_scanner.py` - smoke tests на synthetic breakout и exhaustion сценариях.
 
@@ -58,7 +58,7 @@ python3 -m score_screener --demo --min-score 60 --telegram --send-all
 
 ```bash
 python3 -m score_screener \
-  --csv data/universe_1h.csv \
+  --binance-symbols BTCUSDT,ETHUSDT,SOLUSDT,ALGOUSDT \
   --min-score 60 \
   --telegram \
   --loop \
@@ -87,6 +87,32 @@ python3 -m score_screener --csv candles.csv --symbol ALGO/USDT --min-score 40
 
 ```bash
 python3 -m score_screener --csv universe_1h.csv --min-score 60
+```
+
+## Live Binance input
+
+Для 24/7 режима на хостинге CSV не нужен. Скринер сам берет последние 1H свечи через публичный Binance Spot endpoint:
+
+```bash
+python3 -m score_screener \
+  --binance-symbols BTCUSDT,ETHUSDT,SOLUSDT,ALGOUSDT \
+  --min-score 60 \
+  --telegram
+```
+
+Через env:
+
+```text
+SCREENER_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,ALGOUSDT
+SCREENER_MIN_SCORE=60
+SCREENER_INTERVAL_MINUTES=60
+SCREENER_BINANCE_LIMIT=1000
+```
+
+Можно передать файл символов:
+
+```bash
+python3 -m score_screener --symbols-file symbols.txt --telegram
 ```
 
 ## Scoring
@@ -126,19 +152,63 @@ ScannerConfig(
 
 ## Hosting
 
-Самый простой вариант для VPS:
+Dockerfile уже настроен как 24/7 worker:
+
+```bash
+python -m score_screener --telegram --loop --state-file /app/runtime/screener_state.json
+```
+
+Он читает `SCREENER_SYMBOLS`, `SCREENER_MIN_SCORE`, `SCREENER_INTERVAL_MINUTES`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` из environment variables.
+
+### BotHost.ru
+
+1. Подключи GitHub repository:
+
+```text
+https://github.com/k0ss97-bot/score-screener-MVP
+```
+
+2. Выбери deploy из ветки `main`.
+3. Выбери Dockerfile/container режим.
+4. Добавь environment variables:
+
+```text
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=7619454142
+SCREENER_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,ALGOUSDT
+SCREENER_MIN_SCORE=60
+SCREENER_INTERVAL_MINUTES=60
+SCREENER_BINANCE_LIMIT=1000
+```
+
+5. Запусти deploy. После старта контейнер сразу сделает первый scan, затем будет повторять его раз в `SCREENER_INTERVAL_MINUTES`.
+
+Логи должны содержать:
+
+```text
+No alerts matched the current threshold.
+```
+
+или:
+
+```text
+Telegram: sent N/M alerts.
+```
+
+### VPS/local Docker
+
+Самый простой вариант:
 
 ```bash
 cp .env.example .env
 mkdir -p data runtime
-# положи 1H CSV в data/universe_1h.csv
 docker compose up -d --build
 ```
 
 Для Render/Railway/Fly.io используй Dockerfile и worker command:
 
 ```bash
-python -m score_screener --csv /app/data/universe_1h.csv --min-score 60 --telegram --loop --interval-minutes 60 --state-file /app/runtime/screener_state.json
+python -m score_screener --telegram --loop --state-file /app/runtime/screener_state.json
 ```
 
 Важно: `.env`, runtime state и реальные CSV исключены из git. Секреты добавляй через environment variables хостинга.
