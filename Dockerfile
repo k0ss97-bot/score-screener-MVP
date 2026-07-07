@@ -12,6 +12,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+RUN mkdir -p /app/runtime
 
 COPY pyproject.toml README.md ./
 COPY score_screener ./score_screener

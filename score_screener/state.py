@@ -31,6 +31,7 @@ class SignalState:
 
     def save(self, path: str | Path) -> None:
         state_path = Path(path)
+        state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(
             json.dumps({"sent_keys": sorted(self.sent_keys)}, indent=2),
             encoding="utf-8",
