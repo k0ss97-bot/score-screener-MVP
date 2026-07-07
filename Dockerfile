@@ -2,6 +2,7 @@ FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 ENV SCREENER_EXCHANGE=bybit
 ENV SCREENER_BYBIT_CATEGORY=spot
 ENV SCREENER_QUOTE=USDT
@@ -19,6 +20,7 @@ WORKDIR /app
 RUN mkdir -p /app/runtime
 
 COPY pyproject.toml README.md ./
+COPY run_worker.py ./
 COPY score_screener ./score_screener
 
 CMD ["python", "-m", "score_screener", "--telegram", "--loop", "--state-file", "/app/runtime/screener_state.json"]

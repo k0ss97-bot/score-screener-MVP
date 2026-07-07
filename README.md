@@ -181,6 +181,14 @@ Dockerfile уже настроен как 24/7 worker:
 python -m score_screener --telegram --loop --state-file /app/runtime/screener_state.json
 ```
 
+Если хостинг просит выбрать Python-файл для запуска, выбери:
+
+```text
+run_worker.py
+```
+
+Не выбирай `tests/test_scanner.py` - это unit tests, не worker.
+
 Он читает `SCREENER_EXCHANGE`, `SCREENER_BYBIT_CATEGORY`, `SCREENER_QUOTE`, `SCREENER_SYMBOLS`, `SCREENER_MIN_SCORE`, `SCREENER_INTERVAL_MINUTES`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` из environment variables.
 
 ### BotHost.ru
@@ -192,7 +200,7 @@ https://github.com/k0ss97-bot/score-screener-MVP
 ```
 
 2. Выбери deploy из ветки `main`.
-3. Выбери Dockerfile/container режим.
+3. Выбери Dockerfile/container режим. Если вместо Dockerfile нужно выбрать start file, укажи `run_worker.py`.
 4. Добавь environment variables:
 
 ```text
