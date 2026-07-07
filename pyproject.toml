@@ -1,0 +1,12 @@
+[project]
+name = "score-screener-mvp"
+version = "0.1.0"
+description = "Automatic impulse and exhaustion score screener MVP"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+score-screener = "score_screener.cli:main"
+
+[tool.unittest]
+start-dir = "tests"

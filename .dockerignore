@@ -1,0 +1,12 @@
+.git
+.github
+__pycache__
+*.pyc
+.env
+.screener_state.json
+*.sqlite
+*.sqlite3
+*.db
+.venv
+venv
+data

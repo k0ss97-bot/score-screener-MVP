@@ -1,0 +1,23 @@
+services:
+  score-screener:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data:ro
+      - ./runtime:/app/runtime
+    command:
+      - python
+      - -m
+      - score_screener
+      - --csv
+      - /app/data/universe_1h.csv
+      - --min-score
+      - ${SCREENER_MIN_SCORE:-60}
+      - --telegram
+      - --loop
+      - --interval-minutes
+      - ${SCREENER_INTERVAL_MINUTES:-60}
+      - --state-file
+      - /app/runtime/screener_state.json
+    restart: unless-stopped

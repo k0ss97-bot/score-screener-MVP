@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Local runtime data
+.env
+.screener_state.json
+*.sqlite
+*.sqlite3
+*.db
+data/*.csv
+data/*.json
+runtime/*.json
+runtime/*.sqlite
+runtime/*.sqlite3
+runtime/*.db
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
