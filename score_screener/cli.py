@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import time
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .alerts import format_alert
@@ -19,6 +22,7 @@ from .env import load_env_file
 from .models import ScannerConfig, SignalResult
 from .scanner import scan_universe
 from .state import SignalState
+from .storage import connect, initialize_schema, save_candles, save_signal
 from .telegram import send_telegram_message
 
 
@@ -66,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--telegram-chat-id", help="Telegram chat id. Defaults to TELEGRAM_CHAT_ID")
     parser.add_argument("--env-file", type=Path, default=Path(".env"), help="Optional env file to load")
     parser.add_argument("--state-file", type=Path, default=Path(".screener_state.json"), help="Signal dedupe state file")
+    parser.add_argument("--sqlite-db", type=Path, default=None, help="Optional SQLite database path for candles and signals")
     parser.add_argument("--send-all", action="store_true", help="Send alerts even if they were already sent")
     parser.add_argument("--loop", action="store_true", help="Run forever with sleep between scans")
     parser.add_argument("--interval-minutes", type=float, default=None, help="Loop sleep interval")
@@ -87,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
     args.bybit_category = args.bybit_category or os.environ.get("SCREENER_BYBIT_CATEGORY", "spot")
     args.quote_coin = args.quote_coin or os.environ.get("SCREENER_QUOTE", "USDT")
     args.kline_limit = args.kline_limit if args.kline_limit is not None else int(os.environ.get("SCREENER_KLINE_LIMIT", "1000"))
+    sqlite_db = os.environ.get("SCREENER_SQLITE_DB")
+    args.sqlite_db = args.sqlite_db or (Path(sqlite_db) if sqlite_db else None)
     args.max_symbols = args.max_symbols if args.max_symbols is not None else int(os.environ.get("SCREENER_MAX_SYMBOLS", "0"))
     args.request_delay_seconds = (
         args.request_delay_seconds
@@ -103,7 +110,10 @@ def main(argv: list[str] | None = None) -> int:
     config = ScannerConfig(base_range_pct=args.base_range_pct)
     if args.loop:
         while True:
-            _run_once(args, config)
+            try:
+                _run_once(args, config)
+            except Exception as exc:
+                _print_error(f"Worker scan failed: {exc}")
             time.sleep(max(1.0, args.interval_minutes * 60))
 
     return _run_once(args, config)
@@ -113,13 +123,16 @@ def _run_once(args: argparse.Namespace, config: ScannerConfig) -> int:
     universe = _load_universe(args)
     results = scan_universe(universe, config=config, min_score=args.min_score)
 
+    if args.sqlite_db:
+        _save_scan_to_sqlite(args.sqlite_db, universe, results)
+
     if args.json:
         print(json.dumps([_result_to_dict(result) for result in results], indent=2, default=str))
     else:
         _print_results(results)
 
     if args.telegram:
-        _send_telegram_alerts(results, args)
+        _send_telegram_alerts(results, args, scanned_symbols=universe.keys())
 
     return 0
 
@@ -134,22 +147,38 @@ def _print_results(results: list[SignalResult]) -> None:
         print(format_alert(result))
 
 
-def _send_telegram_alerts(results: list[SignalResult], args: argparse.Namespace) -> None:
+def _send_telegram_alerts(results: list[SignalResult], args: argparse.Namespace, scanned_symbols: Iterable[str]) -> None:
     credentials = _telegram_credentials(args)
-    if not credentials or not results:
+    if not credentials:
         return
 
     token, chat_id = credentials
     state = SignalState.load(args.state_file)
+    active_symbols = {result.symbol for result in results}
+    state.mark_inactive(set(scanned_symbols), active_symbols)
+
+    if not results:
+        state.save(args.state_file)
+        return
+
     sent_count = 0
+    skipped_count = 0
+    failed_count = 0
     for result in results:
         if not args.send_all and not state.is_new(result):
+            skipped_count += 1
             continue
-        send_telegram_message(token=token, chat_id=chat_id, text=format_alert(result))
+        try:
+            send_telegram_message(token=token, chat_id=chat_id, text=format_alert(result))
+        except Exception as exc:
+            failed_count += 1
+            _print_error(f"Telegram: failed to send {result.symbol} {result.signal_type}: {exc}")
+            continue
         state.mark_sent(result)
+        state.save(args.state_file)
         sent_count += 1
     state.save(args.state_file)
-    print(f"Telegram: sent {sent_count}/{len(results)} alerts.")
+    print(f"Telegram: sent {sent_count}/{len(results)} alerts, skipped {skipped_count}, failed {failed_count}.")
 
 
 def _telegram_credentials(args: argparse.Namespace) -> tuple[str, str] | None:
@@ -178,6 +207,19 @@ def _load_universe(args: argparse.Namespace) -> dict:
     )
 
 
+def _save_scan_to_sqlite(db_path: Path, universe: dict, results: list[SignalResult]) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = connect(db_path)
+    try:
+        initialize_schema(connection)
+        for symbol, candles in universe.items():
+            save_candles(connection, symbol, candles)
+        for result in results:
+            save_signal(connection, result)
+    finally:
+        connection.close()
+
+
 def _resolve_symbols(args: argparse.Namespace) -> list[str]:
     symbols: list[str] = []
     if args.symbols_file:
@@ -190,3 +232,8 @@ def _resolve_symbols(args: argparse.Namespace) -> list[str]:
         symbols.extend(parse_symbol_list(raw_symbols))
 
     return list(dict.fromkeys(symbols))
+
+
+def _print_error(message: str) -> None:
+    timestamp = datetime.now(UTC).isoformat(timespec="seconds")
+    print(f"{timestamp} {message}", file=sys.stderr, flush=True)

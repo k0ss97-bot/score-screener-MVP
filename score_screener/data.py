@@ -162,7 +162,7 @@ def fetch_bybit_klines(
                 symbol=display_symbol,
             )
         )
-    return sorted(candles, key=lambda item: item.timestamp)
+    return drop_incomplete_candles(sorted(candles, key=lambda item: item.timestamp), interval)
 
 
 def fetch_bybit_universe(
@@ -213,7 +213,31 @@ def fetch_binance_klines(symbol: str, interval: str = "1h", limit: int = 1000) -
                 symbol=display_symbol,
             )
         )
-    return candles
+    return drop_incomplete_candles(candles, interval)
+
+
+def drop_incomplete_candles(candles: list[Candle], interval: str, now: datetime | None = None) -> list[Candle]:
+    duration = _interval_duration(interval)
+    if duration is None:
+        return candles
+
+    current_time = now or datetime.now(UTC)
+    if current_time.tzinfo is not None:
+        current_time = current_time.astimezone(UTC).replace(tzinfo=None)
+    return [candle for candle in candles if candle.timestamp + duration <= current_time]
+
+
+def _interval_duration(interval: str) -> timedelta | None:
+    normalized = interval.strip().lower()
+    if normalized.isdigit():
+        return timedelta(minutes=int(normalized))
+    if normalized.endswith("m") and normalized[:-1].isdigit():
+        return timedelta(minutes=int(normalized[:-1]))
+    if normalized.endswith("h") and normalized[:-1].isdigit():
+        return timedelta(hours=int(normalized[:-1]))
+    if normalized.endswith("d") and normalized[:-1].isdigit():
+        return timedelta(days=int(normalized[:-1]))
+    return None
 
 
 def fetch_binance_universe(symbols: list[str], interval: str = "1h", limit: int = 1000) -> dict[str, list[Candle]]:

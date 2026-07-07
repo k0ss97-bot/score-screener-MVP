@@ -11,6 +11,7 @@ ENV SCREENER_INTERVAL_MINUTES=60
 ENV SCREENER_KLINE_LIMIT=1000
 ENV SCREENER_MAX_SYMBOLS=0
 ENV SCREENER_REQUEST_DELAY_SECONDS=0.05
+ENV SCREENER_SQLITE_DB=/app/runtime/screener.sqlite
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \

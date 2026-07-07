@@ -15,7 +15,8 @@
 ## Быстрый запуск
 
 ```bash
-cd /Users/konstantingorskih/Documents/Codex/2026-07-07/files-mentioned-by-the-user-score/outputs/score_screener
+git clone https://github.com/k0ss97-bot/score-screener-MVP.git
+cd score-screener-MVP
 python3 -m score_screener --demo
 ```
 
@@ -65,7 +66,7 @@ python3 -m score_screener \
   --interval-minutes 60
 ```
 
-По умолчанию используется `.screener_state.json`, чтобы не слать один и тот же alert повторно. Для повторной отправки добавь `--send-all`.
+По умолчанию используется `.screener_state.json`, чтобы не слать один и тот же alert повторно на каждой новой свече. Alert снова отправится, если символ выпадал ниже порога и затем вернулся, либо если поменялся тип сигнала. Для принудительной повторной отправки добавь `--send-all`.
 
 ## CSV input
 
@@ -111,6 +112,7 @@ SCREENER_INTERVAL_MINUTES=60
 SCREENER_KLINE_LIMIT=1000
 SCREENER_MAX_SYMBOLS=0
 SCREENER_REQUEST_DELAY_SECONDS=0.05
+SCREENER_SQLITE_DB=runtime/screener.sqlite
 SCREENER_SYMBOLS=
 ```
 
@@ -215,9 +217,12 @@ SCREENER_INTERVAL_MINUTES=60
 SCREENER_KLINE_LIMIT=1000
 SCREENER_MAX_SYMBOLS=0
 SCREENER_REQUEST_DELAY_SECONDS=0.05
+SCREENER_SQLITE_DB=/app/runtime/screener.sqlite
 ```
 
 5. Запусти deploy. После старта контейнер сразу найдет все Bybit USDT spot пары, сделает первый scan, затем будет повторять его раз в `SCREENER_INTERVAL_MINUTES`.
+
+Live-загрузчики отбрасывают текущую незакрытую 1H свечу, чтобы алерты не строились на еще меняющихся данных.
 
 Логи должны содержать:
 
